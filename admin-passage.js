@@ -876,10 +876,10 @@
     var s = r("alt_text", fig.alt_text || "");
     i.appendChild(ge("Alt text", s));
     var d = document.createElement("input");
-    ((d.type = "file"),
-      d.setAttribute("data-figure-file", ""),
-      d.accept = "image/svg+xml,image/png,image/jpeg,image/webp,image/gif"),
-      i.appendChild(ge("Image file", d)));
+    d.type = "file";
+    d.setAttribute("data-figure-file", "");
+    d.accept = "image/svg+xml,image/png,image/jpeg,image/webp,image/gif";
+    i.appendChild(ge("Image file", d));
     if (fig.image_url) {
       var l = fe("div", "admin-passage-figure-preview");
       ((l.innerHTML =
@@ -1495,4 +1495,3 @@
       ? document.addEventListener("DOMContentLoaded", Ae)
       : Ae());
 })();
-
