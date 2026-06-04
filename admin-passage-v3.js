@@ -1,3 +1,226 @@
+/* Wizard step pills — validation + navigation (passage + question modals on this site) */
+(function (global) {
+  var STYLE_ID = "admin-wizard-notification-style";
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    var style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent =
+      ".admin-wizard-notification{box-sizing:border-box;margin:0 22px 12px;padding:12px 14px;" +
+      "border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.45;}" +
+      ".admin-wizard-notification strong{display:block;margin-bottom:6px;font-size:13px;}" +
+      ".admin-wizard-notification ul{margin:0;padding-left:18px;}" +
+      ".admin-wizard-notification li{margin:2px 0;}";
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function hideNotification(modal) {
+    if (!modal) return;
+    var el = modal.querySelector(".admin-wizard-notification");
+    if (el) el.remove();
+  }
+
+  function showNotification(modal, messages) {
+    ensureStyles();
+    if (!modal) return;
+    hideNotification(modal);
+    var list = Array.isArray(messages) ? messages : [String(messages)];
+    if (!list.length) return;
+    var host = modal.querySelector(".admin-passage-wizard-steps");
+    var note = document.createElement("div");
+    note.className = "admin-wizard-notification";
+    note.setAttribute("role", "alert");
+    note.innerHTML =
+      "<strong>Please complete required fields</strong><ul>" +
+      list
+        .map(function (msg) {
+          return "<li>" + escapeHtml(msg) + "</li>";
+        })
+        .join("") +
+      "</ul>";
+    if (host && host.parentNode) {
+      host.insertAdjacentElement("afterend", note);
+    } else {
+      var body = modal.querySelector(".admin-passage-wizard-body");
+      if (body) body.insertAdjacentElement("beforebegin", note);
+      else modal.appendChild(note);
+    }
+    note.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function validateQuestionStep1(q) {
+    var errors = [];
+    q = q || {};
+    if (!String(q.question_type || "").trim()) errors.push("Question type is required");
+    if (!String(q.stem || "").trim()) errors.push("Question stem is required");
+    ["A", "B", "C", "D"].forEach(function (letter) {
+      if (!String((q.choices && q.choices[letter]) || "").trim()) {
+        errors.push("Choice " + letter + " is required");
+      }
+    });
+    return errors;
+  }
+
+  function validateQuestionStep2(q) {
+    var correct = String((q && q.correct_choice) || "")
+      .trim()
+      .toUpperCase();
+    if (["A", "B", "C", "D"].indexOf(correct) < 0) {
+      return ["Correct answer (A–D) is required"];
+    }
+    return [];
+  }
+
+  function validatePassageStep1(passage) {
+    var errors = [];
+    passage = passage || {};
+    if (!String(passage.passage_code || "").trim()) {
+      errors.push("Passage code is required");
+    }
+    if (!String(passage.title || "").trim()) errors.push("Title is required");
+    if (!String(passage.body || "").trim()) errors.push("Passage body is required");
+    return errors;
+  }
+
+  function validatePassageStep2(questions) {
+    var errors = [];
+    if (!Array.isArray(questions) || !questions.length) {
+      errors.push("At least one question is required");
+      return errors;
+    }
+    questions.forEach(function (q, index) {
+      var n = index + 1;
+      if (!String(q.stem || "").trim()) {
+        errors.push("Question " + n + ": stem is required");
+      }
+      ["A", "B", "C", "D"].forEach(function (letter) {
+        if (!String((q.choices && q.choices[letter]) || "").trim()) {
+          errors.push("Question " + n + ": choice " + letter + " is required");
+        }
+      });
+    });
+    return errors;
+  }
+
+  function validatePassageStep3(questions) {
+    var errors = [];
+    (questions || []).forEach(function (q, index) {
+      var correct = String(q.correct_choice || "")
+        .trim()
+        .toUpperCase();
+      if (["A", "B", "C", "D"].indexOf(correct) < 0) {
+        errors.push(
+          "Question " + (index + 1) + ": correct answer (A–D) is required",
+        );
+      }
+    });
+    return errors;
+  }
+
+  function validateStep(mode, step, data) {
+    data = data || {};
+    if (mode === "question") {
+      if (step === 1) return validateQuestionStep1(data.question);
+      if (step === 2) return validateQuestionStep2(data.question);
+    }
+    if (mode === "passage") {
+      if (step === 1) return validatePassageStep1(data.passage);
+      if (step === 2) return validatePassageStep2(data.questions);
+      if (step === 3) return validatePassageStep3(data.questions);
+    }
+    return [];
+  }
+
+  function goToStep(options) {
+    var modal = options.modal;
+    var target = Number(options.targetStep);
+    var maxStep = Number(options.maxStep);
+    var current = Number(options.getStep());
+    if (!modal || !Number.isFinite(target) || target < 1 || target > maxStep) {
+      return false;
+    }
+    if (target === current) return true;
+    if (typeof options.readCurrentStep === "function") {
+      options.readCurrentStep(modal);
+    }
+    if (target < current) {
+      hideNotification(modal);
+      options.setStep(target);
+      options.refreshNav();
+      return true;
+    }
+    for (var step = current; step < target; step += 1) {
+      var errors = validateStep(options.mode, step, options.getData());
+      if (errors.length) {
+        showNotification(modal, errors);
+        options.setStep(step);
+        options.refreshNav();
+        return false;
+      }
+    }
+    hideNotification(modal);
+    options.setStep(target);
+    options.refreshNav();
+    return true;
+  }
+
+  function wireStepPills(options) {
+    var modal = options.modal;
+    if (!modal) return;
+    modal.querySelectorAll(".admin-passage-wizard-step-pill").forEach(function (pill) {
+      if (pill.dataset.wizardStepWired === "1") return;
+      pill.dataset.wizardStepWired = "1";
+      pill.setAttribute("role", "button");
+      pill.setAttribute("tabindex", "0");
+      function activate() {
+        goToStep({
+          modal: modal,
+          mode: options.mode,
+          maxStep: options.maxStep,
+          targetStep: Number(pill.getAttribute("data-step")),
+          getStep: options.getStep,
+          setStep: options.setStep,
+          getData: options.getData,
+          readCurrentStep: options.readCurrentStep,
+          refreshNav: options.refreshNav,
+        });
+      }
+      pill.addEventListener("click", function (e) {
+        e.preventDefault();
+        activate();
+      });
+      pill.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activate();
+        }
+      });
+    });
+  }
+
+  global.AdminWizardSteps = {
+    showNotification: showNotification,
+    hideNotification: hideNotification,
+    goToStep: goToStep,
+    wireStepPills: wireStepPills,
+    validateStep: validateStep,
+    validateQuestionStep1: validateQuestionStep1,
+    validateQuestionStep2: validateQuestionStep2,
+    validatePassageStep1: validatePassageStep1,
+    validatePassageStep2: validatePassageStep2,
+    validatePassageStep3: validatePassageStep3,
+  };
+})(typeof window !== "undefined" ? window : globalThis);
+
 !(function () {
   var e = "https://eaxashxpqpihonnuhdpx.supabase.co/functions/v1/",
     t = e + "get-admin-passage-library-stats",
@@ -1296,12 +1519,59 @@
       a.appendChild(d),
       t.appendChild(a),
       document.body.appendChild(t),
+      window.AdminWizardSteps &&
+        window.AdminWizardSteps.wireStepPills({
+          modal: a,
+          mode: "passage",
+          maxStep: 3,
+          getStep: function () {
+            return _.step;
+          },
+          setStep: function (s) {
+            _.step = s;
+          },
+          getData: function () {
+            return { passage: _.passage, questions: _.questions };
+          },
+          readCurrentStep: function (mod) {
+            1 === _.step ? ye(mod) : he(mod);
+          },
+          refreshNav: m,
+        }),
       l.addEventListener("click", function () {
-        (1 === _.step ? ye(a) : he(a), _.step > 1 && ((_.step -= 1), m()));
+        (1 === _.step ? ye(a) : he(a),
+          _.step > 1 &&
+            (window.AdminWizardSteps
+              ? window.AdminWizardSteps.goToStep({
+                  modal: a,
+                  mode: "passage",
+                  maxStep: 3,
+                  targetStep: _.step - 1,
+                  getStep: function () {
+                    return _.step;
+                  },
+                  setStep: function (s) {
+                    _.step = s;
+                  },
+                  getData: function () {
+                    return { passage: _.passage, questions: _.questions };
+                  },
+                  readCurrentStep: function (mod) {
+                    1 === _.step ? ye(mod) : he(mod);
+                  },
+                  refreshNav: m,
+                })
+              : ((_.step -= 1), m())));
       }),
       c.addEventListener("click", function () {
         if ((1 === _.step ? ye(a) : he(a), _.step < 3)) {
           if (1 === _.step) {
+            var W = window.AdminWizardSteps;
+            if (W) {
+              var R = W.validatePassageStep1(_.passage);
+              if (R.length) return void W.showNotification(a, R);
+              W.hideNotification(a);
+            }
             ((c.disabled = !0),
               (c.textContent = "Saving..."),
               F("Saving passage..."),
@@ -1332,11 +1602,26 @@
                 }));
             return;
           }
+          if (2 === _.step) {
+            var P = window.AdminWizardSteps;
+            if (P) {
+              var Q = P.validatePassageStep2(_.questions);
+              if (Q.length) return void P.showNotification(a, Q);
+              P.hideNotification(a);
+            }
+          }
           _.step += 1;
           m();
           return;
         }
         var e = c.textContent;
+        he(a);
+        var X = window.AdminWizardSteps;
+        if (X) {
+          var Y = X.validatePassageStep3(_.questions);
+          if (Y.length) return void X.showNotification(a, Y);
+          X.hideNotification(a);
+        }
         ((c.disabled = !0),
           (c.textContent = "Saving..."),
           F("Saving passage..."));
