@@ -1700,6 +1700,387 @@
         (e.preventDefault(), ue(), _e("Add new passage"));
       });
   }
+
+  var MD_IMPORT_INPUT_ID = "admin-passage-md-file-input";
+
+  function stripMarkdownEmphasis(text) {
+    return String(text || "").replace(/\*([^*]+)\*/g, "$1").trim();
+  }
+
+  function extractMdSection(md, headerName) {
+    var re = new RegExp(
+      "^##\\s+" + headerName + "(?:[^\\n]*)?\\s*$",
+      "im",
+    );
+    var match = re.exec(md);
+    if (!match) return "";
+    var start = md.indexOf("\n", match.index);
+    if (start < 0) return "";
+    start += 1;
+    var rest = md.slice(start);
+    var end = rest.search(/\n---\s*\n|\n##\s+/);
+    return (end >= 0 ? rest.slice(0, end) : rest).trim();
+  }
+
+  function parseMdMetadataBlock(text) {
+    var meta = {};
+    var raw = String(text || "");
+    var boldRe = /\*\*([^*]+?):\*\*\s*([^·\n]+)/g;
+    var boldMatch;
+    while ((boldMatch = boldRe.exec(raw)) !== null) {
+      meta[boldMatch[1].trim().toLowerCase()] = boldMatch[2].trim();
+    }
+    raw.split(/\r?\n/).forEach(function (line) {
+      var m = line.match(/^\s*([^:*\n]+?):\s*(.+?)\s*$/);
+      if (!m) return;
+      var key = m[1].trim().toLowerCase();
+      if (!meta[key]) meta[key] = m[2].trim();
+    });
+    return meta;
+  }
+
+  function parseTitleFromH1(md) {
+    var m = md.match(/^#\s+(.+)$/m);
+    if (!m) return "";
+    var raw = m[1].trim();
+    var parts = raw.split(/\s+[—–-]\s+/);
+    if (parts.length > 1) return parts.slice(1).join(" — ").trim();
+    return raw.replace(/^(B\/B|CARS|CP|PS|Chem\/Phys|Bio\/Biochem|Psych\/Soc)\s+Passage\s*/i, "").trim() || raw;
+  }
+
+  function inferSectionFromImport(meta, fileName, h1Title, passageCode) {
+    var blob = [
+      fileName,
+      h1Title,
+      meta.id || "",
+      meta.title || "",
+      passageCode || "",
+      meta.section || "",
+    ]
+      .join(" ")
+      .toUpperCase();
+    if (/\bBB\b|B\/B|BIO.?BIOCHEM|B_B\b/.test(blob)) return "BB";
+    if (/\bCP\b|CHEM.?PHYS|CHEMISTRY/.test(blob)) return "CP";
+    if (/\bPS\b|PSYCH/.test(blob)) return "PS";
+    if (/\bCARS\b|\bPMC\b/.test(blob)) return "CARS";
+    return "CARS";
+  }
+
+  function cleanImportedPassageBody(text) {
+    return String(text || "")
+      .replace(
+        /\*\*\[FIGURE\s+([0-9]+[A-Z]?)\s+appears\s+here\]\*\*/gi,
+        "(Figure $1)",
+      )
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function mapImportedQuestionType(headerMeta, sectionCode) {
+    var h = String(headerMeta || "").toLowerCase();
+    var skill = (h.match(/skill\s*(\d)/) || [])[1];
+    if (sectionCode === "BB") {
+      if (skill === "1" || /knowledge/.test(h)) return "bb_knowledge";
+      if (skill === "4" || /data.?interpret/.test(h)) {
+        return "bb_data_interpretation";
+      }
+      if (skill === "3" || /research.?design/.test(h)) {
+        return "bb_research_design";
+      }
+      return "bb_reasoning";
+    }
+    if (skill === "3" || /apply|weaken|integrate|new situation|prediction/.test(h)) {
+      return "reasoning_beyond";
+    }
+    if (skill === "2" || /rhetorical|assumption|function|reasoning/.test(h)) {
+      return "reasoning_within";
+    }
+    return "inference";
+  }
+
+  function parseImportedQuestionBlock(order, headerMeta, body, sectionCode) {
+    var lines = String(body || "").split(/\r?\n/);
+    var stemLines = [];
+    var choices = {};
+    var correct = "";
+    var explanations = { A: "", B: "", C: "", D: "" };
+    var phase = "stem";
+
+    lines.forEach(function (line) {
+      var trimmed = line.trim();
+      if (!trimmed) return;
+      if (/^\*\*Explanation/i.test(trimmed)) {
+        phase = "explanation";
+        return;
+      }
+      if (phase === "stem" && /^-\s*\*\*[A-D]\./i.test(trimmed)) {
+        phase = "choices";
+      }
+      if (phase === "choices" && /^-\s*\*\*[A-D]\s*[—–-]/i.test(trimmed)) {
+        phase = "explanation";
+      }
+
+      if (phase === "stem") {
+        stemLines.push(trimmed);
+        return;
+      }
+
+      if (phase === "choices") {
+        var cm = trimmed.match(
+          /^-\s*\*\*([A-D])\.\s*(?:\[CORRECT\]\s*)?\*\*\s*(.+)$/i,
+        );
+        if (!cm) return;
+        var letter = cm[1].toUpperCase();
+        choices[letter] = stripMarkdownEmphasis(cm[2]);
+        if (/\[CORRECT\]/i.test(trimmed)) correct = letter;
+        return;
+      }
+
+      if (phase === "explanation") {
+        var em = trimmed.match(
+          /^-\s*\*\*([A-D])\s*[—–-]\s*([^*]+)\*\*\s*(.*)$/i,
+        );
+        if (!em) return;
+        var key = em[1].toUpperCase();
+        var label = em[2].trim();
+        var text = stripMarkdownEmphasis(em[3]);
+        explanations[key] = text;
+        if (/correct/i.test(label) && !correct) correct = key;
+      }
+    });
+
+    if (!correct) correct = "A";
+
+    return {
+      question_order: Number(order) || 1,
+      question_type: mapImportedQuestionType(headerMeta, sectionCode),
+      stem: stemLines.join("\n").trim(),
+      choices: {
+        A: choices.A || "",
+        B: choices.B || "",
+        C: choices.C || "",
+        D: choices.D || "",
+      },
+      correct_choice: correct,
+      explanation_correct: explanations[correct] || "",
+      explanation_a: explanations.A || "",
+      explanation_b: explanations.B || "",
+      explanation_c: explanations.C || "",
+      explanation_d: explanations.D || "",
+    };
+  }
+
+  function parseImportedQuestions(md, sectionCode) {
+    var sectionText =
+      extractMdSection(md, "QUESTIONS") ||
+      extractMdSection(md, "QUESTION SET");
+    if (!sectionText) return [];
+
+    var questions = [];
+    var re =
+      /^###\s+Q(\d+)\s*[—–-]\s*([^\n]+)\n([\s\S]*?)(?=^###\s+Q\d+|\n##\s+|$)/gim;
+    var match;
+    while ((match = re.exec(sectionText)) !== null) {
+      questions.push(
+        parseImportedQuestionBlock(
+          match[1],
+          match[2],
+          match[3],
+          sectionCode,
+        ),
+      );
+    }
+    return questions;
+  }
+
+  function parsePassageMarkdown(md, fileName) {
+    var warnings = [];
+    var metadataText = extractMdSection(md, "METADATA");
+    var meta = parseMdMetadataBlock(metadataText);
+    var h1Title = parseTitleFromH1(md);
+
+    var passageCode = String(meta.id || "")
+      .replace(/\s*\(suggested\)\s*/i, "")
+      .trim();
+    if (!passageCode && fileName) {
+      passageCode = String(fileName)
+        .replace(/\.md$/i, "")
+        .replace(/[^a-zA-Z0-9_-]+/g, "-")
+        .toUpperCase();
+    }
+
+    var title =
+      stripMarkdownEmphasis(meta.title || "") ||
+      h1Title ||
+      passageCode ||
+      "Untitled passage";
+
+    var body = cleanImportedPassageBody(
+      extractMdSection(md, "PASSAGE TEXT"),
+    );
+    if (!body) {
+      throw new Error("Could not find ## PASSAGE TEXT in the markdown file.");
+    }
+
+    var section = inferSectionFromImport(
+      meta,
+      fileName || "",
+      h1Title,
+      passageCode,
+    );
+
+    var difficultyRaw =
+      (meta.difficulty || "").match(/(\d+)/) ||
+      (metadataText || "").match(/\*\*Difficulty:\*\*\s*(\d+)/i);
+    var difficulty = difficultyRaw ? Number(difficultyRaw[1]) : 5;
+    if (!Number.isFinite(difficulty)) difficulty = 5;
+
+    var sourceAttribution =
+      stripMarkdownEmphasis(meta["source citation"] || "") ||
+      stripMarkdownEmphasis(meta.source || "") ||
+      "";
+
+    var bodyLines = body.split(/\r?\n/);
+    var lastLine = bodyLines[bodyLines.length - 1] || "";
+    if (/written for premed catalyst/i.test(lastLine)) {
+      sourceAttribution = stripMarkdownEmphasis(lastLine);
+      body = bodyLines.slice(0, -1).join("\n").trim();
+    }
+
+    var subdomain =
+      stripMarkdownEmphasis(meta.subdomain || "") ||
+      stripMarkdownEmphasis(meta.content || "") ||
+      "";
+    var domain = stripMarkdownEmphasis(meta.domain || "");
+    var argumentMode =
+      stripMarkdownEmphasis(meta["argument mode"] || "") ||
+      stripMarkdownEmphasis(meta.arc || "") ||
+      "";
+
+    var questions = parseImportedQuestions(md, section);
+    if (!questions.length) {
+      throw new Error("No questions found (expected ## QUESTIONS with ### Q1 blocks).");
+    }
+
+    questions.forEach(function (q, idx) {
+      if (!q.stem) warnings.push("Question " + (idx + 1) + " is missing a stem.");
+      ["A", "B", "C", "D"].forEach(function (key) {
+        if (!q.choices[key]) {
+          warnings.push(
+            "Question " + (idx + 1) + " is missing choice " + key + ".",
+          );
+        }
+      });
+    });
+
+    return {
+      warnings: warnings,
+      passage: {
+        passage_code: passageCode,
+        title: title,
+        body: body,
+        domain: domain,
+        subdomain: subdomain,
+        argument_mode: argumentMode,
+        cohesion: "",
+        difficulty: difficulty,
+        section: section,
+        source_attribution: sourceAttribution,
+        is_active: true,
+      },
+      questions: questions,
+    };
+  }
+
+  function importPassageFromMarkdownFile(file) {
+    if (!file) return Promise.resolve();
+    return file
+      .text()
+      .then(function (text) {
+        var parsed = parsePassageMarkdown(text, file.name || "");
+        var confirmMsg =
+          "Import this passage?\n\n" +
+          "Code: " +
+          parsed.passage.passage_code +
+          "\n" +
+          "Title: " +
+          parsed.passage.title +
+          "\n" +
+          "Section: " +
+          parsed.passage.section +
+          "\n" +
+          "Questions: " +
+          parsed.questions.length;
+        if (parsed.warnings.length) {
+          confirmMsg +=
+            "\n\nWarnings:\n- " + parsed.warnings.slice(0, 5).join("\n- ");
+        }
+        if (!window.confirm(confirmMsg)) return null;
+
+        F("Importing passage from markdown...");
+        return I(
+          i,
+          L({
+            action: "save_all",
+            passage: parsed.passage,
+            questions: parsed.questions,
+          }),
+        ).then(function (result) {
+          return { result: result, parsed: parsed };
+        });
+      })
+      .then(function (payload) {
+        if (!payload) return;
+        F("Refreshing library...");
+        return Promise.all([Q(), V(0, !1)]).then(function () {
+          window.alert(
+            "Passage imported: " +
+              payload.parsed.passage.passage_code +
+              " (" +
+              payload.parsed.questions.length +
+              " questions). Figures can be added via Edit passage.",
+          );
+        });
+      })
+      .catch(function (err) {
+        console.error("MD passage import error:", err);
+        window.alert(
+          (err && err.message) ||
+            "Could not import passage from markdown file.",
+        );
+      })
+      .finally(N);
+  }
+
+  function wireMdPassageUpload() {
+    if (wireMdPassageUpload._wired) return;
+    wireMdPassageUpload._wired = true;
+
+    var input = document.getElementById(MD_IMPORT_INPUT_ID);
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "file";
+      input.id = MD_IMPORT_INPUT_ID;
+      input.accept = ".md,text/markdown,text/plain";
+      input.style.display = "none";
+      document.body.appendChild(input);
+    }
+
+    document.addEventListener("click", function (event) {
+      var trigger = event.target.closest("[data-admin-upload-file-passage]");
+      if (!trigger) return;
+      event.preventDefault();
+      input.value = "";
+      input.click();
+    });
+
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      importPassageFromMarkdownFile(file);
+    });
+  }
+
   function Ce() {
     D() ||
       (T(),
@@ -1721,6 +2102,7 @@
         }
       })(),
       xe(),
+      wireMdPassageUpload(),
       ue(),
       F("Loading passage library..."),
       Promise.all([Q(), V(0, !1)])
