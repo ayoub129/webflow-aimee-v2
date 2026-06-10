@@ -17,7 +17,10 @@
     style.textContent =
       ".admin-wizard-notification{box-sizing:border-box;margin:0 22px 12px;padding:12px 14px;" +
       "border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.45;}" +
+      ".admin-wizard-notification.is-warning{border-color:#fcd34d;background:#fffbeb;color:#92400e;}" +
+      ".admin-wizard-notification.is-info{border-color:#bfdbfe;background:#eff6ff;color:#1e3a8a;}" +
       ".admin-wizard-notification strong{display:block;margin-bottom:6px;font-size:13px;}" +
+      ".admin-wizard-notification p{margin:8px 0 0;}" +
       ".admin-wizard-notification ul{margin:0;padding-left:18px;}" +
       ".admin-wizard-notification li{margin:2px 0;}";
     (document.head || document.documentElement).appendChild(style);
@@ -25,28 +28,13 @@
 
   function hideNotification(modal) {
     if (!modal) return;
-    var el = modal.querySelector(".admin-wizard-notification");
-    if (el) el.remove();
+    modal.querySelectorAll(".admin-wizard-notification").forEach(function (el) {
+      el.remove();
+    });
   }
 
-  function showNotification(modal, messages) {
-    ensureStyles();
-    if (!modal) return;
-    hideNotification(modal);
-    var list = Array.isArray(messages) ? messages : [String(messages)];
-    if (!list.length) return;
+  function mountWizardNotification(modal, note) {
     var host = modal.querySelector(".admin-passage-wizard-steps");
-    var note = document.createElement("div");
-    note.className = "admin-wizard-notification";
-    note.setAttribute("role", "alert");
-    note.innerHTML =
-      "<strong>Please complete required fields</strong><ul>" +
-      list
-        .map(function (msg) {
-          return "<li>" + escapeHtml(msg) + "</li>";
-        })
-        .join("") +
-      "</ul>";
     if (host && host.parentNode) {
       host.insertAdjacentElement("afterend", note);
     } else {
@@ -55,6 +43,74 @@
       else modal.appendChild(note);
     }
     note.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function listMarkup(messages) {
+    var list = Array.isArray(messages) ? messages : [String(messages)];
+    if (!list.length) return "";
+    return (
+      "<ul>" +
+      list
+        .map(function (msg) {
+          return "<li>" + escapeHtml(msg) + "</li>";
+        })
+        .join("") +
+      "</ul>"
+    );
+  }
+
+  function showNotification(modal, messages, title) {
+    ensureStyles();
+    if (!modal) return;
+    hideNotification(modal);
+    var list = Array.isArray(messages) ? messages : [String(messages)];
+    if (!list.length) return;
+    var note = document.createElement("div");
+    note.className = "admin-wizard-notification";
+    note.setAttribute("role", "alert");
+    note.innerHTML =
+      "<strong>" +
+      escapeHtml(title || "Please complete required fields") +
+      "</strong>" +
+      listMarkup(list);
+    mountWizardNotification(modal, note);
+  }
+
+  function showReviewNotification(modal, config) {
+    ensureStyles();
+    if (!modal) return;
+    config = config || {};
+    hideNotification(modal);
+
+    var errors = Array.isArray(config.errors) ? config.errors : [];
+    var warnings = Array.isArray(config.warnings) ? config.warnings : [];
+    var info = String(config.info || "").trim();
+    if (!errors.length && !warnings.length && !info) return;
+
+    var note = document.createElement("div");
+    note.className =
+      "admin-wizard-notification" +
+      (errors.length ? "" : warnings.length ? " is-warning" : " is-info");
+    note.setAttribute("role", "alert");
+
+    var html =
+      "<strong>" +
+      escapeHtml(config.title || "Import review") +
+      "</strong>";
+    if (info) {
+      html += "<p>" + escapeHtml(info) + "</p>";
+    }
+    if (errors.length) {
+      html +=
+        "<strong>Errors — fix before saving</strong>" + listMarkup(errors);
+    }
+    if (warnings.length) {
+      html +=
+        "<strong>Warnings — review recommended</strong>" +
+        listMarkup(warnings);
+    }
+    note.innerHTML = html;
+    mountWizardNotification(modal, note);
   }
 
   function validateQuestionStep1(q) {
@@ -209,6 +265,7 @@
 
   global.AdminWizardSteps = {
     showNotification: showNotification,
+    showReviewNotification: showReviewNotification,
     hideNotification: hideNotification,
     goToStep: goToStep,
     wireStepPills: wireStepPills,
@@ -1962,15 +2019,34 @@
       throw new Error("No questions found (expected ## QUESTIONS with ### Q1 blocks).");
     }
 
+    if (!domain) {
+      warnings.push("Domain was not found in metadata.");
+    }
+    if (!subdomain) {
+      warnings.push("Subdomain / topic was not found in metadata.");
+    }
+    if (!argumentMode) {
+      warnings.push("Argument mode was not found in metadata.");
+    }
+    if (!sourceAttribution) {
+      warnings.push("Source attribution was not found in metadata.");
+    }
+    if (/\[FIGURE\s+\d/i.test(body) || /##\s+FIGURE\s+PLAN/i.test(md)) {
+      warnings.push(
+        "Figure placeholders were detected — upload figures in the wizard after saving step 1.",
+      );
+    }
+
     questions.forEach(function (q, idx) {
-      if (!q.stem) warnings.push("Question " + (idx + 1) + " is missing a stem.");
-      ["A", "B", "C", "D"].forEach(function (key) {
-        if (!q.choices[key]) {
-          warnings.push(
-            "Question " + (idx + 1) + " is missing choice " + key + ".",
-          );
-        }
-      });
+      if (
+        !q.explanation_a &&
+        !q.explanation_b &&
+        !q.explanation_correct
+      ) {
+        warnings.push(
+          "Question " + (idx + 1) + " has no choice explanations parsed.",
+        );
+      }
     });
 
     return {
@@ -1992,55 +2068,101 @@
     };
   }
 
+  function collectMdImportIssues(parsed) {
+    var errors = [];
+    var warnings = (parsed && parsed.warnings ? parsed.warnings.slice() : []);
+    var W = window.AdminWizardSteps;
+
+    if (W && parsed) {
+      errors = errors
+        .concat(W.validatePassageStep1(parsed.passage || {}))
+        .concat(W.validatePassageStep2(parsed.questions || []))
+        .concat(W.validatePassageStep3(parsed.questions || []));
+    }
+
+    return {
+      errors: errors.filter(function (item, index, arr) {
+        return arr.indexOf(item) === index;
+      }),
+      warnings: warnings.filter(function (item, index, arr) {
+        return arr.indexOf(item) === index;
+      }),
+    };
+  }
+
+  function showMdImportReview(modal, parsed, fileName) {
+    if (!modal || !parsed) return;
+    var issues = collectMdImportIssues(parsed);
+    var W = window.AdminWizardSteps;
+    if (!W) return;
+
+    var info =
+      "Loaded " +
+      parsed.questions.length +
+      " question(s) for section " +
+      (parsed.passage.section || "CARS") +
+      ". Review each step, then save when ready.";
+
+    if (!issues.errors.length && !issues.warnings.length) {
+      W.showReviewNotification(modal, {
+        title: "Markdown import ready",
+        info: info,
+        warnings: [
+          "Figures are not imported from markdown — add them in Step 1 after the passage is saved.",
+        ],
+      });
+      return;
+    }
+
+    W.showReviewNotification(modal, {
+      title: "Imported from " + (fileName || "markdown file"),
+      info: info,
+      errors: issues.errors,
+      warnings: issues.warnings,
+    });
+  }
+
+  function openPassageWizardFromMarkdown(parsed, fileName) {
+    ue();
+    _.passageId = null;
+    _.figures = [];
+    _.step = 1;
+    _.passage = Object.assign(
+      {
+        passage_code: "",
+        title: "",
+        body: "",
+        domain: "",
+        subdomain: "",
+        argument_mode: "",
+        cohesion: "",
+        difficulty: 5,
+        section: "CARS",
+        source_attribution: "",
+        is_active: true,
+      },
+      parsed.passage || {},
+    );
+    _.questions = (parsed.questions || []).map(function (q, idx) {
+      return Object.assign(ce(q.question_order || idx + 1), q, {
+        question_order: q.question_order || idx + 1,
+      });
+    });
+    if (!_.questions.length) _.questions = [ce(1)];
+
+    _e("Review imported passage");
+
+    var modal = document.querySelector(".admin-passage-wizard");
+    showMdImportReview(modal, parsed, fileName);
+  }
+
   function importPassageFromMarkdownFile(file) {
     if (!file) return Promise.resolve();
     return file
       .text()
       .then(function (text) {
         var parsed = parsePassageMarkdown(text, file.name || "");
-        var confirmMsg =
-          "Import this passage?\n\n" +
-          "Code: " +
-          parsed.passage.passage_code +
-          "\n" +
-          "Title: " +
-          parsed.passage.title +
-          "\n" +
-          "Section: " +
-          parsed.passage.section +
-          "\n" +
-          "Questions: " +
-          parsed.questions.length;
-        if (parsed.warnings.length) {
-          confirmMsg +=
-            "\n\nWarnings:\n- " + parsed.warnings.slice(0, 5).join("\n- ");
-        }
-        if (!window.confirm(confirmMsg)) return null;
-
-        F("Importing passage from markdown...");
-        return I(
-          i,
-          L({
-            action: "save_all",
-            passage: parsed.passage,
-            questions: parsed.questions,
-          }),
-        ).then(function (result) {
-          return { result: result, parsed: parsed };
-        });
-      })
-      .then(function (payload) {
-        if (!payload) return;
-        F("Refreshing library...");
-        return Promise.all([Q(), V(0, !1)]).then(function () {
-          window.alert(
-            "Passage imported: " +
-              payload.parsed.passage.passage_code +
-              " (" +
-              payload.parsed.questions.length +
-              " questions). Figures can be added via Edit passage.",
-          );
-        });
+        openPassageWizardFromMarkdown(parsed, file.name || "");
       })
       .catch(function (err) {
         console.error("MD passage import error:", err);
@@ -2048,8 +2170,7 @@
           (err && err.message) ||
             "Could not import passage from markdown file.",
         );
-      })
-      .finally(N);
+      });
   }
 
   function wireMdPassageUpload() {
