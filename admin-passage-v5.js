@@ -1934,10 +1934,15 @@
     if (!sectionText) return [];
 
     var questions = [];
-    var re =
-      /^###\s+Q(\d+)\s*[—–-]\s*([^\n]+)\n([\s\S]*?)(?=^###\s+Q\d+|\n##\s+|$)/gim;
-    var match;
-    while ((match = re.exec(sectionText)) !== null) {
+    var chunks = sectionText.split(/\n(?=###\s+Q\d+\s*[—–-])/i);
+
+    chunks.forEach(function (chunk) {
+      chunk = String(chunk || "").trim();
+      if (!chunk) return;
+      var match = chunk.match(
+        /^###\s+Q(\d+)\s*[—–-]\s*([^\n]+)\n([\s\S]*)$/i,
+      );
+      if (!match) return;
       questions.push(
         parseImportedQuestionBlock(
           match[1],
@@ -1946,7 +1951,8 @@
           sectionCode,
         ),
       );
-    }
+    });
+
     return questions;
   }
 
