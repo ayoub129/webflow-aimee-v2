@@ -1853,10 +1853,35 @@
     return (end >= 0 ? rest.slice(0, end) : rest).trim();
   }
 
+  function extractIntroMetadataBlock(md) {
+    var raw = String(md || "");
+    var afterTitle = raw.replace(/^#\s+.+(?:\r?\n)+/m, "");
+    var end = afterTitle.search(/\n---\s*\n|\n##\s+/);
+    return (end >= 0 ? afterTitle.slice(0, end) : afterTitle).trim();
+  }
+
+  function extractImportedPassageBody(md) {
+    var body =
+      extractMdSection(md, "PASSAGE TEXT") ||
+      extractMdSection(md, "PASSAGE") ||
+      extractMdSection(md, "Passage");
+    if (body) return cleanImportedPassageBody(body);
+
+    var raw = String(md || "");
+    var startMatch = raw.match(/\n---\s*\n/);
+    var questionsMatch = raw.search(/\n##\s+(QUESTIONS|QUESTION SET)\b/i);
+    if (startMatch && questionsMatch > startMatch.index) {
+      return cleanImportedPassageBody(
+        raw.slice(startMatch.index + startMatch[0].length, questionsMatch),
+      );
+    }
+    return "";
+  }
+
   function parseMdMetadataBlock(text) {
     var meta = {};
     var raw = String(text || "");
-    var boldRe = /\*\*([^*]+?):\*\*\s*([^·\n]+)/g;
+    var boldRe = /\*\*([^*]+?):\*\*\s*([^·\u00b7\n]+)/g;
     var boldMatch;
     while ((boldMatch = boldRe.exec(raw)) !== null) {
       meta[boldMatch[1].trim().toLowerCase()] = boldMatch[2].trim();
@@ -2006,6 +2031,17 @@
         return;
       }
 
+      var plainChoiceMatch = trimmed.match(
+        /^(?:[-*]\s*)?([A-D])[\).]\s*(?:\*\*)?\s*(?:\[CORRECT\]\s*)?(?:\*\*)?\s*(.+)$/i,
+      );
+      if (plainChoiceMatch) {
+        phase = "choices";
+        var plainLetter = plainChoiceMatch[1].toUpperCase();
+        choices[plainLetter] = stripMarkdownEmphasis(plainChoiceMatch[2]);
+        if (/\[CORRECT\]/i.test(trimmed)) correct = plainLetter;
+        return;
+      }
+
       if (phase === "stem" && /^-\s*\*\*[A-D]\./i.test(trimmed)) {
         phase = "choices";
       }
@@ -2022,6 +2058,11 @@
         var cm = trimmed.match(
           /^-\s*\*\*([A-D])\.\s*(?:\[CORRECT\]\s*)?\*\*\s*(.+)$/i,
         );
+        if (!cm) {
+          cm = trimmed.match(
+            /^(?:[-*]\s*)?([A-D])[\).]\s*(?:\*\*)?\s*(?:\[CORRECT\]\s*)?(?:\*\*)?\s*(.+)$/i,
+          );
+        }
         if (!cm) return;
         var letter = cm[1].toUpperCase();
         choices[letter] = stripMarkdownEmphasis(cm[2]);
@@ -2071,13 +2112,13 @@
     if (!sectionText) return [];
 
     var questions = [];
-    var chunks = sectionText.split(/\n(?=###\s+Q\d+\s*[—–-])/i);
+    var chunks = sectionText.split(/\n(?=###\s+Q\d+\b)/i);
 
     chunks.forEach(function (chunk) {
       chunk = String(chunk || "").trim();
       if (!chunk) return;
       var match = chunk.match(
-        /^###\s+Q(\d+)\s*[—–-]\s*([^\n]+)\n([\s\S]*)$/i,
+        /^###\s+Q(\d+)\b\s*(?:[^\w\s]+\s*)?([^\n]*)\n([\s\S]*)$/i,
       );
       if (!match) return;
       questions.push(
@@ -2095,11 +2136,12 @@
 
   function parsePassageMarkdown(md, fileName) {
     var warnings = [];
-    var metadataText = extractMdSection(md, "METADATA");
+    var metadataText =
+      extractMdSection(md, "METADATA") || extractIntroMetadataBlock(md);
     var meta = parseMdMetadataBlock(metadataText);
     var h1Title = parseTitleFromH1(md);
 
-    var passageCode = String(meta.id || "")
+    var passageCode = String(meta.id || meta["suggested id"] || "")
       .replace(/\s*\(suggested\)\s*/i, "")
       .trim();
     if (!passageCode && fileName) {
@@ -2115,11 +2157,9 @@
       passageCode ||
       "Untitled passage";
 
-    var body = cleanImportedPassageBody(
-      extractMdSection(md, "PASSAGE TEXT"),
-    );
+    var body = extractImportedPassageBody(md);
     if (!body) {
-      throw new Error("Could not find ## PASSAGE TEXT in the markdown file.");
+      throw new Error("Could not find a passage section in the markdown file.");
     }
 
     var section = inferSectionFromImport(
