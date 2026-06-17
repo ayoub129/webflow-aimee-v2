@@ -144,6 +144,9 @@
     }
     if (!String(passage.title || "").trim()) errors.push("Title is required");
     if (!String(passage.body || "").trim()) errors.push("Passage body is required");
+    if (!String(passage.source_attribution || "").trim()) {
+      errors.push("Source attribution is required");
+    }
     return errors;
   }
 
@@ -390,7 +393,7 @@
               t && "object" == typeof t
                 ? t.message || t.details || t.error
                 : t;
-            var n = e.message || e.user_message || a || e.error;
+            var n = e.user_message || e.error || e.message || a;
             var i = String(n || "");
             var r = i.match(/Key\s+\(([^)]+)\)=\(([^)]+)\)\s+already exists/i);
             if (r) {
@@ -608,7 +611,7 @@
                   cohesion: t.cohesion || "",
                   difficulty: null != t.difficulty ? t.difficulty : 5,
                   section: t.section || "CARS",
-                  source_attribution: t.source_attribution || "",
+                  source_attribution: t.source_attribution || t.source || "",
                   is_active: !1 !== t.is_active,
                 };
                 var a = Array.isArray(e.questions) ? e.questions : [];
@@ -1713,7 +1716,12 @@
                   m();
                 })
                 .catch(function (e) {
-                  window.alert(e.message || "Save failed");
+                  var msg = e.message || "Save failed";
+                  if (window.AdminWizardSteps) {
+                    window.AdminWizardSteps.showNotification(a, [msg], "Could not save passage");
+                  } else {
+                    window.alert(msg);
+                  }
                 })
                 .finally(function () {
                   (N(), (c.disabled = !1), (c.textContent = "Continue"));
@@ -1799,7 +1807,12 @@
           });
           t
             .catch(function (e) {
-              window.alert(e.message || "Save failed");
+              var msg = e.message || "Save failed";
+              if (window.AdminWizardSteps) {
+                window.AdminWizardSteps.showNotification(a, [msg], "Could not save passage");
+              } else {
+                window.alert(msg);
+              }
             })
             .finally(function () {
               (N(), (c.disabled = !1), (c.textContent = e));
