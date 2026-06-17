@@ -1897,15 +1897,69 @@
     var choices = {};
     var correct = "";
     var explanations = { A: "", B: "", C: "", D: "" };
+    var whyCorrect = "";
     var phase = "stem";
 
     lines.forEach(function (line) {
       var trimmed = line.trim();
       if (!trimmed) return;
+      if (/^---+$/.test(trimmed)) return;
+
+      var stemMatch = trimmed.match(/^\*\*Stem:\*\*\s*(.*)$/i);
+      if (stemMatch) {
+        phase = "stem";
+        if (stemMatch[1]) stemLines.push(stripMarkdownEmphasis(stemMatch[1]));
+        return;
+      }
+
+      var correctMatch = trimmed.match(
+        /^\*\*Correct\s+answer:\*\*\s*([A-D])\b/i,
+      );
+      if (correctMatch) {
+        correct = correctMatch[1].toUpperCase();
+        phase = "explanation";
+        return;
+      }
+
+      var whyCorrectMatch = trimmed.match(/^\*\*Why\s+correct:\*\*\s*(.*)$/i);
+      if (whyCorrectMatch) {
+        whyCorrect = stripMarkdownEmphasis(whyCorrectMatch[1]);
+        phase = "explanation";
+        return;
+      }
+
+      var whyWrongMatch = trimmed.match(
+        /^\*\*Why\s+([A-D])\s+is\s+wrong:\*\*\s*(.*)$/i,
+      );
+      if (whyWrongMatch) {
+        explanations[whyWrongMatch[1].toUpperCase()] = stripMarkdownEmphasis(
+          whyWrongMatch[2],
+        );
+        phase = "explanation";
+        return;
+      }
+
+      if (/^\*\*Passage\s+anchor:\*\*/i.test(trimmed)) {
+        phase = "explanation";
+        return;
+      }
+
       if (/^\*\*Explanation/i.test(trimmed)) {
         phase = "explanation";
         return;
       }
+
+      var choiceMatch = trimmed.match(
+        /^(?:[-*]\s*)?\*\*([A-D])[\).]\s*(?:\[CORRECT\]\s*)?\*\*\s*(.+)$/i,
+      );
+      if (choiceMatch) {
+        phase = "choices";
+        var choiceLetter = choiceMatch[1].toUpperCase();
+        choices[choiceLetter] = stripMarkdownEmphasis(choiceMatch[2]);
+        if (/\[CORRECT\]/i.test(trimmed)) correct = choiceLetter;
+        return;
+      }
+
       if (phase === "stem" && /^-\s*\*\*[A-D]\./i.test(trimmed)) {
         phase = "choices";
       }
@@ -1943,6 +1997,7 @@
     });
 
     if (!correct) correct = "A";
+    if (whyCorrect && !explanations[correct]) explanations[correct] = whyCorrect;
 
     return {
       question_order: Number(order) || 1,
