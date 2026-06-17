@@ -439,7 +439,7 @@
           var e = document.createElement("style");
           ((e.id = P),
             (e.textContent =
-              "[data-admin-passage-library-filters],[data-passage-library-filters]{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}.passage-library-filter-bar,[data-admin-passage-library-filters]{padding:14px 20px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;}select[data-passage-filter-difficulty],select[data-passage-filter-publication],select[data-passage-filter-passage-type],select[data-passage-filter-status],[data-admin-passage-library-filters] select,[data-passage-library-filters] select{appearance:none;-webkit-appearance:none;height:40px;min-width:148px;padding:0 36px 0 12px;font-size:13px;font-weight:500;color:#1c1c1c;background:#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748b' d='M1 1l5 5 5-5'/%3E%3C/svg%3E\") no-repeat right 12px center;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;box-sizing:border-box;}select[data-passage-filter-difficulty]:focus,select[data-passage-filter-publication]:focus,select[data-passage-filter-passage-type]:focus{outline:none;border-color:#ffa25f;box-shadow:0 0 0 3px rgba(255,162,95,.2);}[data-passage-filter-clear]{height:40px;padding:0 16px;font-size:13px;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;}"),
+              "[data-admin-passage-library-filters],[data-passage-library-filters]{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}.passage-library-filter-bar,[data-admin-passage-library-filters]{padding:14px 20px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;}select[data-passage-filter-difficulty],select[data-passage-filter-publication],select[data-passage-filter-section],select[data-passage-filter-passage-type],select[data-passage-filter-status],[data-admin-passage-library-filters] select,[data-passage-library-filters] select{appearance:none;-webkit-appearance:none;height:40px;min-width:148px;padding:0 36px 0 12px;font-size:13px;font-weight:500;color:#1c1c1c;background:#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748b' d='M1 1l5 5 5-5'/%3E%3C/svg%3E\") no-repeat right 12px center;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;box-sizing:border-box;}select[data-passage-filter-difficulty]:focus,select[data-passage-filter-publication]:focus,select[data-passage-filter-section]:focus,select[data-passage-filter-passage-type]:focus{outline:none;border-color:#ffa25f;box-shadow:0 0 0 3px rgba(255,162,95,.2);}[data-passage-filter-clear]{height:40px;padding:0 16px;font-size:13px;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;}"),
             (document.head || document.documentElement).appendChild(e));
         }
       })(),
@@ -707,6 +707,9 @@
               search: ie() ? String(ie().value || "").trim() : "",
               difficulty: re(te() ? te().value : ""),
               publication_status: oe(ae() ? ae().value : ""),
+              section: parseAdminSectionFilter(
+                getAdminSectionSelect() ? getAdminSectionSelect().value : "",
+              ),
               passage_type: String(ne() ? ne().value : "").trim(),
             },
           }),
@@ -892,6 +895,9 @@
   function ne() {
     return Z("passage-type");
   }
+  function getAdminSectionSelect() {
+    return Z("section");
+  }
   function ie() {
     var e = Z("search");
     return (
@@ -923,6 +929,10 @@
           : "all"
       : "all";
   }
+  function parseAdminSectionFilter(e) {
+    var t = String(e || "").trim();
+    return t && !/^all sections/i.test(t) ? t : "";
+  }
   function se() {
     return ((u = 0), (p = !1), F("Updating passages..."), V(0, !1).finally(N));
   }
@@ -949,13 +959,39 @@
           (W(a, "All Publications", "All Publications"),
             W(a, "Published", "Published"),
             W(a, "Draft", "Draft"));
+          var i = K("section", "Section");
+          (W(i, "", "All Sections"),
+            W(i, "CP", "Chem/Phys"),
+            W(i, "CARS", "CARS"),
+            W(i, "BB", "Bio/Biochem"),
+            W(i, "PS", "Psych/Soc"));
           var n = K("passage-type", "Passage type");
           (W(n, "", "All Passage Types"),
             e.appendChild(t),
             e.appendChild(a),
+            e.appendChild(i),
             e.appendChild(n),
             v && ee(v));
         }
+      })(),
+      (function () {
+        var e = X();
+        if (!e || e.querySelector("[data-passage-filter-section]")) return;
+        var t = K("section", "Section");
+        (W(t, "", "All Sections"),
+          W(t, "CP", "Chem/Phys"),
+          W(t, "CARS", "CARS"),
+          W(t, "BB", "Bio/Biochem"),
+          W(t, "PS", "Psych/Soc"));
+        var a = ne(),
+          n = ae();
+        a
+          ? e.insertBefore(t, a)
+          : n && n.nextSibling
+            ? e.insertBefore(t, n.nextSibling)
+            : n
+              ? n.insertAdjacentElement("afterend", t)
+              : e.appendChild(t);
       })(),
       !h)
     ) {
@@ -969,7 +1005,7 @@
             b && clearTimeout(b),
             se().catch(console.error));
         })),
-        [te(), ae(), ne()].forEach(function (e) {
+        [te(), ae(), getAdminSectionSelect(), ne()].forEach(function (e) {
           e &&
             e.addEventListener("change", function () {
               se().catch(console.error);
@@ -991,7 +1027,7 @@
             (function () {
               var e = ie();
               (e && (e.value = ""),
-                [te(), ae(), ne()].forEach(function (e) {
+                [te(), ae(), getAdminSectionSelect(), ne()].forEach(function (e) {
                   e &&
                     e.options &&
                     e.options.length > 0 &&
