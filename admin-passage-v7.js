@@ -378,7 +378,32 @@
     }).then(function (e) {
       return e.json().then(function (t) {
         if (!e.ok) {
-          var a = (t && (t.error || t.details)) || "Request failed";
+          var a = (function (e) {
+            if (!e) return "Request failed";
+            var t = e.details;
+            if ("string" == typeof t) {
+              try {
+                t = JSON.parse(t);
+              } catch (e) {}
+            }
+            var a =
+              t && "object" == typeof t
+                ? t.message || t.details || t.error
+                : t;
+            var n = e.message || e.user_message || a || e.error;
+            var i = String(n || "");
+            var r = i.match(/Key\s+\(([^)]+)\)=\(([^)]+)\)\s+already exists/i);
+            if (r) {
+              return "passage_code" === r[1]
+                ? "Passage code " + r[2] + " already exists. Please use a different passage code."
+                : r[1] + " " + r[2] + " already exists.";
+            }
+            return i && "Admin passage wizard failed" !== i
+              ? i
+              : e.error && a && e.error !== a
+                ? e.error + ": " + a
+                : e.error || "Request failed";
+          })(t);
           throw new Error(a);
         }
         return t;
@@ -1881,6 +1906,14 @@
         return "bb_research_design";
       }
       return "bb_reasoning";
+    }
+    if (
+      skill === "1" ||
+      /main\s*idea|primary\s*purpose|central\s*claim|author'?s?\s*purpose|purpose|thesis|big\s*picture|foundations?/.test(
+        h,
+      )
+    ) {
+      return "foundations";
     }
     if (skill === "3" || /apply|weaken|integrate|new situation|prediction/.test(h)) {
       return "reasoning_beyond";
