@@ -1833,6 +1833,11 @@
   }
 
   var MD_IMPORT_INPUT_ID = "admin-passage-md-file-input";
+  var MD_IMPORT_VERSION = "md-import-flexible-passage-v2";
+
+  if (window.console && window.console.info) {
+    window.console.info("Admin passage library loaded:", MD_IMPORT_VERSION);
+  }
 
   function stripMarkdownEmphasis(text) {
     return String(text || "").replace(/\*([^*]+)\*/g, "$1").trim();
