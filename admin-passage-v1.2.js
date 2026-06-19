@@ -1777,22 +1777,20 @@
             );
           })
           .then(function (e) {
-            Array.isArray(e.questions) &&
-              (_.questions = e.questions.map(function (e, t) {
-                return {
-                  id: e.id,
-                  question_order: e.question_order || t + 1,
-                  question_type: e.question_type,
-                  stem: e.stem,
-                  choices: e.choices || {},
-                  correct_choice: e.correct_choice || "A",
-                  explanation_correct: e.explanation_correct || "",
-                  explanation_a: e.explanation_a || "",
-                  explanation_b: e.explanation_b || "",
-                  explanation_c: e.explanation_c || "",
-                  explanation_d: e.explanation_d || "",
-                };
-              }));
+            if (Array.isArray(e.questions)) {
+              var savedByOrder = {};
+              e.questions.forEach(function (saved, idx) {
+                savedByOrder[Number(saved.question_order || idx + 1)] = saved;
+              });
+              _.questions = _.questions.map(function (q, idx) {
+                var order = Number(q.question_order || idx + 1);
+                var saved = savedByOrder[order] || e.questions[idx] || {};
+                return Object.assign({}, q, {
+                  id: saved.id || q.id,
+                  question_order: saved.question_order || q.question_order || idx + 1,
+                });
+              });
+            }
             return I(
               i,
               L({
