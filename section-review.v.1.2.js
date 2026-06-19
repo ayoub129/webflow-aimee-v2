@@ -925,6 +925,47 @@
     });
   }
 
+  function findSectionPassageRowTemplate() {
+    return document.querySelector("[data-survey-passage-template]");
+  }
+
+  function hideSectionPassageRowTemplate(template) {
+    if (!template) return;
+    template.style.display = "none";
+    template.setAttribute("aria-hidden", "true");
+  }
+
+  function clearActivePassageSurveyRatings(row) {
+    if (!row) return;
+    row
+      .querySelectorAll(".div-block-266.active, [data-survey-value].active")
+      .forEach(function (btn) {
+        btn.classList.remove("active");
+      });
+  }
+
+  function renderCurrentPassageSurveyRow(summary) {
+    var container = document.querySelector("[data-survey-passage-rows]");
+    var template = findSectionPassageRowTemplate();
+    if (!container || !template || !summary) return null;
+
+    var row = template.cloneNode(true);
+    row.removeAttribute("data-survey-passage-template");
+    row.removeAttribute("id");
+    row.style.display = "";
+    row.setAttribute("aria-hidden", "false");
+    row.setAttribute("data-survey-passage-row", "");
+    row.setAttribute("data-section-current-passage-survey", "");
+    row.setAttribute("data-passage-id", summary.passage_id);
+
+    clearActivePassageSurveyRatings(row);
+    setSectionPassageSurveyRowLabel(row, summary);
+    container.innerHTML = "";
+    container.appendChild(row);
+    hideSectionPassageRowTemplate(template);
+    return row;
+  }
+
   function getSectionPassageSurveyRows() {
     var explicit = Array.prototype.slice.call(
       document.querySelectorAll("[data-survey-passage-row]"),
@@ -1059,10 +1100,13 @@
   }
 
   function setupSectionPassageSurvey(summary, content) {
-    var rows = getSectionPassageSurveyRows();
-    if (!summary || !content || rows.length === 0) return;
+    if (!summary || !content) return;
 
-    var row = rows[0];
+    var row = renderCurrentPassageSurveyRow(summary);
+    var rows = row ? [row] : getSectionPassageSurveyRows();
+    if (rows.length === 0) return;
+
+    row = rows[0];
     rows.slice(1).forEach(function (extraRow) {
       extraRow.style.display = "none";
       extraRow.setAttribute("aria-hidden", "true");
