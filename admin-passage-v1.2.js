@@ -1393,6 +1393,9 @@
         var a = e.querySelector('[name="' + t + '"]');
         return a ? a.value : "";
       }
+      function has(t) {
+        return Boolean(e.querySelector('[name="' + t + '"]'));
+      }
       var i = n("question_type").trim(),
         r = n("question_type_custom").trim() || ("__custom__" === i ? "" : i),
         o = _.questions[t] || {},
@@ -1408,13 +1411,22 @@
           C: n("choice_c").trim() || (o.choices && o.choices.C) || "",
           D: n("choice_d").trim() || (o.choices && o.choices.D) || "",
         },
-        correct_choice: s || o.correct_choice || "A",
-        explanation_correct:
-          n("explanation_correct").trim() || o.explanation_correct || "",
-        explanation_a: n("explanation_a").trim() || o.explanation_a || "",
-        explanation_b: n("explanation_b").trim() || o.explanation_b || "",
-        explanation_c: n("explanation_c").trim() || o.explanation_c || "",
-        explanation_d: n("explanation_d").trim() || o.explanation_d || "",
+        correct_choice: has("correct_choice") ? s : o.correct_choice || "A",
+        explanation_correct: has("explanation_correct")
+          ? n("explanation_correct").trim()
+          : o.explanation_correct || "",
+        explanation_a: has("explanation_a")
+          ? n("explanation_a").trim()
+          : o.explanation_a || "",
+        explanation_b: has("explanation_b")
+          ? n("explanation_b").trim()
+          : o.explanation_b || "",
+        explanation_c: has("explanation_c")
+          ? n("explanation_c").trim()
+          : o.explanation_c || "",
+        explanation_d: has("explanation_d")
+          ? n("explanation_d").trim()
+          : o.explanation_d || "",
       });
     }),
       (_.questions = a.length ? a : [ce(1)]));
@@ -1754,9 +1766,25 @@
         var t = I(
           i,
           L({
-            action: "save_step1",
+            action: "save_all",
             passage_id: _.passageId,
             passage: _.passage,
+            questions: _.questions,
+            figures: _.figures
+              .filter(function (fig) {
+                return fig.panel_label && fig.caption && fig.image_url;
+              })
+              .map(function (fig) {
+                return {
+                  id: fig.id,
+                  figure_number: fig.figure_number,
+                  panel_label: fig.panel_label,
+                  sort_order: fig.sort_order,
+                  image_url: fig.image_url,
+                  caption: fig.caption,
+                  alt_text: fig.alt_text || null,
+                };
+              }),
           }),
         )
           .then(function (e) {
@@ -1765,40 +1793,6 @@
           })
           .then(function () {
             return Fe();
-          })
-          .then(function () {
-            return I(
-              i,
-              L({
-                action: "save_step2",
-                passage_id: _.passageId,
-                questions: _.questions,
-              }),
-            );
-          })
-          .then(function (e) {
-            if (Array.isArray(e.questions)) {
-              var savedByOrder = {};
-              e.questions.forEach(function (saved, idx) {
-                savedByOrder[Number(saved.question_order || idx + 1)] = saved;
-              });
-              _.questions = _.questions.map(function (q, idx) {
-                var order = Number(q.question_order || idx + 1);
-                var saved = savedByOrder[order] || e.questions[idx] || {};
-                return Object.assign({}, q, {
-                  id: saved.id || q.id,
-                  question_order: saved.question_order || q.question_order || idx + 1,
-                });
-              });
-            }
-            return I(
-              i,
-              L({
-                action: "save_step3",
-                passage_id: _.passageId,
-                questions: _.questions,
-              }),
-            );
           })
           .then(function () {
             return me(), F("Refreshing library..."), Promise.all([Q(), V(0, !1)]);
